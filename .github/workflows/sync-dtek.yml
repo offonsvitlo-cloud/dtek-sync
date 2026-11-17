@@ -1,1 +1,89 @@
+name: Sync DTEK Schedule to PythonAnywhere
 
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-dtek:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch DTEK schedule and push to PythonAnywhere
+        env:
+          TARGET_URL: https://Onoff.pythonanywhere.com/api/dtek/push-snapshot
+          CRON_SECRET: dtek2026secret
+        run: |
+          python3 - << 'PY'
+          import json, os, urllib.request
+
+          req = urllib.request.Request(
+              'https://www.dtek-dnem.com.ua/ua/shutdowns',
+              headers={
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0',
+                  'Accept-Language': 'uk-UA,uk;q=0.9',
+              },
+          )
+          html = urllib.request.urlopen(req, timeout=20).read().decode('utf-8', 'ignore')
+
+          def extract_json(prefix):
+              marker = f'{prefix} = '
+              idx = html.find(marker)
+              if idx == -1:
+                  return None
+              pos = idx + len(marker)
+              while pos < len(html) and html[pos] not in '{[':
+                  pos += 1
+              open_ch = html[pos]
+              close_ch = '}' if open_ch == '{' else ']'
+              depth, in_str, esc = 0, False, False
+              for i in range(pos, len(html)):
+                  ch = html[i]
+                  if esc:
+                      esc = False
+                      continue
+                  if ch == '\\' and in_str:
+                      esc = True
+                      continue
+                  if ch == '"':
+                      in_str = not in_str
+                      continue
+                  if not in_str:
+                      if ch == open_ch:
+                          depth += 1
+                      elif ch == close_ch:
+                          depth -= 1
+                          if depth == 0:
+                              return json.loads(html[pos : i + 1])
+              return None
+
+          fact = extract_json('DisconSchedule.fact') or {}
+          preset = extract_json('DisconSchedule.preset') or {}
+          days = fact.get('data') or {}
+          if not days:
+              raise RuntimeError('Empty DTEK fact.data')
+
+          groups = sorted({g for dm in days.values() for g in dm.keys()})
+          group_names = {g: f"Черга {g.replace('GPV', '')}" for g in groups}
+          group_names.update(preset.get('sch_names') or {})
+
+          payload = {
+              'snapshot': {
+                  'today': fact.get('today'),
+                  'update': fact.get('update', ''),
+                  'groups': groups,
+                  'days': days,
+                  'groupNames': group_names,
+              }
+          }
+          body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+          push_url = f"{os.environ['TARGET_URL']}?secret={os.environ['CRON_SECRET']}"
+          push_req = urllib.request.Request(
+              push_url,
+              data=body,
+              headers={'Content-Type': 'application/json'},
+              method='POST',
+          )
+          resp = urllib.request.urlopen(push_req, timeout=20).read().decode('utf-8')
+          print('Push result:', resp)
+          PY
