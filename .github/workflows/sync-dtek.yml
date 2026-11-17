@@ -20,7 +20,7 @@ jobs:
 
           DTEK_URL = os.environ.get('DTEK_URL') or 'https://www.dtek-dnem.com.ua/ua/shutdowns'
           TARGET_URL = os.environ['TARGET_URL']
-          SECRET = os.environ.get('CRON_SECRET', '')
+          SECRET = os.environ.get('CRON_SECRET', 'dtek2026secret')
           if not SECRET:
               sys.exit('CRON_SECRET is empty: add it in Settings -> Secrets and variables -> Actions -> New repository secret')
 
