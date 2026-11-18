@@ -16,11 +16,14 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           python3 - << 'PY'
-          import json, os, sys, time, urllib.error, urllib.parse, urllib.request
+          import http.cookiejar, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
 
           DTEK_URL = os.environ.get('DTEK_URL') or 'https://www.dtek-dnem.com.ua/ua/shutdowns'
+          DTEK_AJAX_URL = os.environ.get('DTEK_AJAX_URL') or 'https://www.dtek-dnem.com.ua/ua/ajax'
+          UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0'
+          opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
           TARGET_URL = os.environ['TARGET_URL']
-          SECRET = os.environ.get('CRON_SECRET', 'dtek2026secret').strip()
+          SECRET = os.environ.get('CRON_SECRET', '').strip()
           if not SECRET:
               sys.exit('CRON_SECRET is empty: add it in Settings -> Secrets and variables -> Actions -> New repository secret')
 
@@ -29,11 +32,11 @@ jobs:
               for i in range(tries):
                   try:
                       req = urllib.request.Request(url, headers={
-                          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0',
+                          'User-Agent': UA,
                           'Accept': 'text/html,application/xhtml+xml',
                           'Accept-Language': 'uk-UA,uk;q=0.9',
                       })
-                      with urllib.request.urlopen(req, timeout=25) as r:
+                      with opener.open(req, timeout=25) as r:
                           return r.read().decode('utf-8', 'ignore')
                   except urllib.error.HTTPError as e:
                       last = f'HTTP {e.code}'
@@ -109,5 +112,56 @@ jobs:
               print('Push result:', resp)
           except urllib.error.HTTPError as e:
               sys.exit(f'Server rejected the push: HTTP {e.code} {e.read().decode("utf-8", "ignore")[:200]} (check that CRON_SECRET matches the one in your PythonAnywhere WSGI file)')
+
+          # ---- emergency / unplanned outages by address (non-fatal: the schedule is already synced) ----
+          try:
+              base = TARGET_URL.rsplit('/api/dtek/push-snapshot', 1)[0]
+              q = urllib.parse.quote(SECRET, safe='')
+              watch = json.loads(urllib.request.urlopen(f'{base}/api/dtek/watchlist?secret={q}', timeout=30).read().decode('utf-8'))
+              streets = watch.get('streets') or []
+              if not streets:
+                  print('Outage check: no addresses with emergency notifications and a house number')
+              else:
+                  m = re.search(r'<meta name="csrf-token" content="([^"]+)"', html)
+                  csrf = m.group(1) if m else ''
+                  results = []
+                  for item in streets:
+                      form = {
+                          'method': 'getHomeNum',
+                          'data[0][name]': 'city', 'data[0][value]': item['city'],
+                          'data[1][name]': 'street', 'data[1][value]': item['street'],
+                      }
+                      if fact.get('update'):
+                          form['data[2][name]'] = 'updateFact'
+                          form['data[2][value]'] = fact['update']
+                      req = urllib.request.Request(DTEK_AJAX_URL, data=urllib.parse.urlencode(form).encode(), headers={
+                          'User-Agent': UA, 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': csrf,
+                          'Referer': DTEK_URL, 'Origin': 'https://www.dtek-dnem.com.ua',
+                      })
+                      try:
+                          data = json.loads(opener.open(req, timeout=25).read().decode('utf-8', 'ignore'))
+                      except Exception as e:
+                          print(f"Outage check skipped for {item['street']}: {e!r}")
+                          continue
+                      houses = {}
+                      for hk, info in (data.get('data') or {}).items():
+                          houses[str(hk)] = {
+                              'subType': info.get('sub_type', ''),
+                              'startDate': info.get('start_date', ''),
+                              'endDate': info.get('end_date', ''),
+                              'type': info.get('type', ''),
+                          }
+                      results.append({'city': item['city'], 'street': item['street'], 'houses': houses})
+                      time.sleep(0.7)
+                  if results:
+                      out_req = urllib.request.Request(
+                          f'{base}/api/dtek/push-outages?secret={q}',
+                          data=json.dumps({'results': results}, ensure_ascii=False).encode('utf-8'),
+                          headers={'Content-Type': 'application/json'}, method='POST')
+                      print('Outage check result:', urllib.request.urlopen(out_req, timeout=30).read().decode('utf-8'))
+                  else:
+                      print('Outage check: DTEK returned nothing (blocked or changed), skipped')
+          except Exception as e:
+              print('Outage check failed (schedule sync itself is fine):', repr(e))
           PY
           
