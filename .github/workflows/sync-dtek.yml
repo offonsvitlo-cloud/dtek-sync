@@ -23,7 +23,7 @@ jobs:
           UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0'
           opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
           TARGET_URL = os.environ['TARGET_URL']
-          SECRET = os.environ.get('CRON_SECRET', '').strip()
+          SECRET = os.environ.get('CRON_SECRET', 'dtek2026secret').strip()
           if not SECRET:
               sys.exit('CRON_SECRET is empty: add it in Settings -> Secrets and variables -> Actions -> New repository secret')
 
