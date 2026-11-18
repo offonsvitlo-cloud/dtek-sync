@@ -1,4 +1,4 @@
-ame: Sync DTEK Schedule to PythonAnywhere
+name: Sync DTEK Schedule to PythonAnywhere
 
 on:
   schedule:
