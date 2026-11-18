@@ -16,11 +16,11 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           python3 - << 'PY'
-          import json, os, sys, time, urllib.error, urllib.request
+          import json, os, sys, time, urllib.error, urllib.parse, urllib.request
 
           DTEK_URL = os.environ.get('DTEK_URL') or 'https://www.dtek-dnem.com.ua/ua/shutdowns'
           TARGET_URL = os.environ['TARGET_URL']
-          SECRET = os.environ.get('CRON_SECRET', 'dtek2026secret')
+          SECRET = os.environ.get('CRON_SECRET', '').strip()
           if not SECRET:
               sys.exit('CRON_SECRET is empty: add it in Settings -> Secrets and variables -> Actions -> New repository secret')
 
@@ -99,7 +99,7 @@ jobs:
           }
           body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
           push_req = urllib.request.Request(
-              f'{TARGET_URL}?secret={SECRET}',
+              f'{TARGET_URL}?secret={urllib.parse.quote(SECRET, safe="")}',
               data=body,
               headers={'Content-Type': 'application/json'},
               method='POST',
