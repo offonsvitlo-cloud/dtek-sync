@@ -84,6 +84,7 @@ jobs:
           preset = extract_json('DisconSchedule.preset') or {}
           days = fact.get('data') or {}
           if not days:
+              print("HTML snippet:", html[:1500])
               sys.exit('DTEK page was downloaded, but the schedule (DisconSchedule.fact) is empty or missing')
 
           groups = sorted({g for dm in days.values() for g in dm.keys()})
