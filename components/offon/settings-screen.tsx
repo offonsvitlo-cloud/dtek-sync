@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Heart, Moon, MoonStar, Star } from 'lucide-react'
 import { api, getTelegram, haptic, json, type Bootstrap } from '@/lib/api'
+import { adsDebugEnabled, setAdsDebug } from '@/lib/ads'
 import { addressesWord, daysWord, LANGS, LOCALE } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
-import { useActions, useExtras, useT } from '@/hooks/use-app-data'
-import { ReferralCard } from './perks'
+import { useActions, useExtras, useNow, useT } from '@/hooks/use-app-data'
+import { ReferralCard, TrialCard } from './perks'
 import { Switch } from './switch'
 
 interface SettingsScreenProps {
@@ -18,6 +19,18 @@ interface SettingsScreenProps {
 export function SettingsScreen({ data, dark, onToggleDark }: SettingsScreenProps) {
   const { updateSettings, setLanguage, demo } = useActions()
   const { t, lang } = useT()
+  const now = useNow()
+  const taps = useRef({ n: 0, at: 0 })
+  const tapFooter = () => {
+    const now = Date.now()
+    taps.current = { n: now - taps.current.at < 2500 ? taps.current.n + 1 : 1, at: now }
+    if (taps.current.n >= 5) {
+      taps.current.n = 0
+      const on = !adsDebugEnabled()
+      setAdsDebug(on)
+      setMessage(t(on ? 'set.adsDebugOn' : 'set.adsDebugOff'))
+    }
+  }
   const extras = useExtras()
   const [message, setMessage] = useState<string | null>(null)
   const s = data.subscriber
@@ -165,6 +178,7 @@ export function SettingsScreen({ data, dark, onToggleDark }: SettingsScreenProps
         ) : null}
       </section>
 
+      <TrialCard subscriber={data.subscriber} now={now} />
       <ReferralCard />
 
       {message && (
@@ -173,7 +187,7 @@ export function SettingsScreen({ data, dark, onToggleDark }: SettingsScreenProps
         </p>
       )}
 
-      <p className="pb-2 text-center text-xs text-muted-foreground">
+      <p className="pb-2 text-center text-xs text-muted-foreground select-none" onClick={tapFooter}>
         {t('set.footer', { v: data.snapshot.update ?? '—' })}
       </p>
     </div>

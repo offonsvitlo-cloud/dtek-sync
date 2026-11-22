@@ -4,12 +4,14 @@ import { useState } from 'react'
 import { MapPinPlus, RefreshCw } from 'lucide-react'
 import type { Bootstrap } from '@/lib/api'
 import { haptic } from '@/lib/api'
+import { hourKind } from '@/lib/schedule'
 import { queueStatus } from '@/lib/address-status'
 import { queueLabel } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
-import { useActions, useT } from '@/hooks/use-app-data'
+import { useActions, useT, useVisibleAlerts } from '@/hooks/use-app-data'
 import { AddressStrip } from './address-strip'
 import { HistorySection } from './history-section'
+import { ReminderSheet } from './reminder-sheet'
 import { ScheduleGrid } from './schedule-grid'
 import { StatusCard } from './status-card'
 
@@ -28,6 +30,8 @@ export function HomeScreen({ data, now, selectedId, onSelect, onAddAddress, dark
   const { t, lang } = useT()
   const [refreshing, setRefreshing] = useState(false)
   const [showTomorrow, setShowTomorrow] = useState(false)
+  const [picked, setPicked] = useState<{ hour: number; dayKey: string; tomorrow: boolean } | null>(null)
+  const visibleAlerts = useVisibleAlerts()
 
   const { snapshot, subscriber } = data
   const addresses = subscriber.addresses
@@ -88,7 +92,14 @@ export function HomeScreen({ data, now, selectedId, onSelect, onAddAddress, dark
   const status = queueStatus(snapshot, selected.queue, now)
   const dayKey = showTomorrow ? status.tomorrowKey : status.todayKey
   const hours = dayKey ? snapshot.days?.[dayKey]?.[selected.queue] : undefined
-  const alerts = data.alerts.filter((a) => !a.addressId || a.addressId === selected.id)
+  const alerts = visibleAlerts.filter((a) =>
+    a.addressId ? a.addressId === selected.id : !a.queue || a.queue === 'ALL' || a.queue === selected.queue,
+  )
+  const reminders = (subscriber.reminders ?? []).filter((r) => r.addressId === selected.id && !r.sent)
+  const reminderHours = reminders.filter((r) => r.dayKey === dayKey).map((r) => r.hour)
+  const pickedReminder = picked
+    ? reminders.find((r) => r.dayKey === picked.dayKey && r.hour === picked.hour)
+    : undefined
 
   return (
     <div className="space-y-4">
@@ -135,7 +146,26 @@ export function HomeScreen({ data, now, selectedId, onSelect, onAddAddress, dark
         minutesOfDay={status.clock.minutesOfDay}
         dark={dark}
         onToggleDark={onToggleDark}
+        reminderHours={reminderHours}
+        onPickHour={(hour) => {
+          if (!dayKey) return
+          haptic('light')
+          setPicked({ hour, dayKey, tomorrow: showTomorrow })
+        }}
       />
+
+      {picked && (
+        <ReminderSheet
+          key={`${picked.dayKey}-${picked.hour}`}
+          onClose={() => setPicked(null)}
+          address={selected}
+          dayKey={picked.dayKey}
+          dayLabel={picked.tomorrow ? t('hist.tomorrow') : t('hist.today')}
+          hour={picked.hour}
+          kind={hourKind(snapshot.days?.[picked.dayKey]?.[selected.queue]?.[String(picked.hour)])}
+          existing={pickedReminder}
+        />
+      )}
 
       <HistorySection
         snapshot={snapshot}

@@ -1,6 +1,6 @@
 'use client'
 
-import { CircleHelp, Clock, Zap, ZapOff } from 'lucide-react'
+import { Bell, CircleHelp, Clock, Zap, ZapOff } from 'lucide-react'
 import { hourKind, type HourKind, type SlotValue } from '@/lib/schedule'
 import type { Key } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
@@ -16,6 +16,8 @@ interface ScheduleGridProps {
   minutesOfDay: number
   dark: boolean
   onToggleDark: (v: boolean) => void
+  onPickHour?: (hour: number) => void
+  reminderHours?: number[]
 }
 
 const KIND_STYLE: Record<HourKind, string> = {
@@ -36,7 +38,7 @@ const KIND_TEXT: Record<HourKind, Key> = {
   unknown: 'kind.unknown',
 }
 
-const KIND_LABEL: Record<HourKind, Key> = {
+export const KIND_LABEL: Record<HourKind, Key> = {
   on: 'kindLabel.on',
   off: 'kindLabel.off',
   'off-first': 'kindLabel.offFirst',
@@ -63,6 +65,8 @@ export function ScheduleGrid({
   minutesOfDay,
   dark,
   onToggleDark,
+  onPickHour,
+  reminderHours = [],
 }: ScheduleGridProps) {
   const { t } = useT()
   const currentHour = Math.floor(minutesOfDay / 60)
@@ -104,23 +108,34 @@ export function ScheduleGrid({
             const kind = hourKind(hours?.[String(h + 1)])
             const isNow = !showTomorrow && h === currentHour
             const time = `${String(h).padStart(2, '0')}:00`
+            const canRemind = Boolean(onPickHour) && (showTomorrow || h > currentHour)
+            const hasReminder = reminderHours.includes(h + 1)
             return (
-              <li
-                key={h}
-                aria-label={`${time} — ${t(KIND_LABEL[kind])}${isNow ? t('grid.nowAria') : ''}`}
-                aria-current={isNow ? 'time' : undefined}
-                className={cn(
-                  'relative flex min-h-14 flex-col justify-between rounded-[10px] border px-1.5 py-1.5 text-[11px] leading-tight transition-transform',
-                  KIND_STYLE[kind],
-                  isNow && 'now-ring z-10 scale-[1.04]',
-                  !showTomorrow && h < currentHour && 'opacity-55',
-                )}
-              >
-                <span className="flex items-center justify-between gap-0.5 font-medium tabular-nums">
-                  {time}
-                  <KindIcon kind={kind} />
-                </span>
-                <span className="truncate text-xs font-medium">{t(KIND_TEXT[kind])}</span>
+              <li key={h}>
+                <button
+                  type="button"
+                  disabled={!canRemind}
+                  onClick={() => onPickHour?.(h + 1)}
+                  aria-label={`${time} — ${t(KIND_LABEL[kind])}${isNow ? t('grid.nowAria') : ''}${hasReminder ? t('rem.cellSet') : canRemind ? t('rem.cellTap') : ''}`}
+                  aria-current={isNow ? 'time' : undefined}
+                  className={cn(
+                    'relative flex min-h-14 w-full flex-col justify-between rounded-[10px] border px-1.5 py-1.5 text-left text-[11px] leading-tight transition-transform',
+                    KIND_STYLE[kind],
+                    isNow && 'now-ring z-10 scale-[1.04]',
+                    !showTomorrow && h < currentHour && 'opacity-55',
+                    canRemind && 'active:scale-95',
+                    !canRemind && 'cursor-default',
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-0.5 font-medium tabular-nums">
+                    {time}
+                    <KindIcon kind={kind} />
+                  </span>
+                  <span className="flex items-center justify-between gap-0.5">
+                    <span className="truncate text-xs font-medium">{t(KIND_TEXT[kind])}</span>
+                    {hasReminder && <Bell className="size-3 shrink-0" fill="currentColor" aria-hidden="true" />}
+                  </span>
+                </button>
               </li>
             )
           })}
@@ -130,6 +145,8 @@ export function ScheduleGrid({
           {showTomorrow ? t('grid.emptyTomorrow') : t('grid.emptyToday')}
         </p>
       )}
+
+      {hasData && onPickHour && <p className="mt-2 text-xs text-muted-foreground">{t('rem.tapHint')}</p>}
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label={t('grid.legend')}>

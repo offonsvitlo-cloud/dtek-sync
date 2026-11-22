@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react'
 import useSWR from 'swr'
-import { Check, FlaskConical, LoaderCircle, Search, Star, X } from 'lucide-react'
-import { api, ApiError, getTelegram, haptic, isTrialActive, TRIAL_DAYS } from '@/lib/api'
+import { Check, LoaderCircle, Search, Star, X } from 'lucide-react'
+import { api, ApiError, getTelegram, haptic, isTrialActive } from '@/lib/api'
 import { DEMO_CITIES, DEMO_STREETS } from '@/lib/demo-data'
 import type { Snapshot } from '@/lib/schedule'
 import { cn } from '@/lib/utils'
-import { daysWord } from '@/lib/i18n'
+import { TrialCard } from './perks'
 import { useActions, useBootstrap, useT } from '@/hooks/use-app-data'
 
 interface AddAddressSheetProps {
@@ -29,11 +29,10 @@ function useDebounced<T>(value: T, ms = 250) {
 type HouseInfo = { queue?: string } & Record<string, unknown>
 
 export function AddAddressSheet({ open, onClose, snapshot, onAdded }: AddAddressSheetProps) {
-  const { addAddress, unlockTrial, demo } = useActions()
+  const { addAddress, demo } = useActions()
   const { t, lang } = useT()
   const { data: boot } = useBootstrap()
   const sub = boot?.subscriber
-  const trialAvailable = Boolean(sub && !sub.proActive && !sub.rewardUsed && !isTrialActive(sub))
   const [label, setLabel] = useState('')
   const [cityQ, setCityQ] = useState('')
   const [city, setCity] = useState('')
@@ -104,6 +103,13 @@ export function AddAddressSheet({ open, onClose, snapshot, onAdded }: AddAddress
     if (queueAuto) queueRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [queueAuto, queue])
 
+  useEffect(() => {
+    if (limitReached && sub && isTrialActive(sub)) {
+      setLimitReached(false)
+      setError(null)
+    }
+  }, [limitReached, sub])
+
   if (!open) return null
 
   const houseEntries = Object.entries(houses.data?.houses ?? {})
@@ -141,17 +147,6 @@ export function AddAddressSheet({ open, onClose, snapshot, onAdded }: AddAddress
       }
     } finally {
       setSaving(false)
-    }
-  }
-
-  const startTrial = async () => {
-    try {
-      await unlockTrial()
-      haptic('medium')
-      setLimitReached(false)
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('sheet.trialFail'))
     }
   }
 
@@ -364,16 +359,6 @@ export function AddAddressSheet({ open, onClose, snapshot, onAdded }: AddAddress
           {error && (
             <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
               {error}
-              {limitReached && trialAvailable && (
-                <button
-                  type="button"
-                  onClick={startTrial}
-                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-on py-2 font-medium text-on-foreground"
-                >
-                  <FlaskConical className="size-4" aria-hidden="true" />
-                  {t('sheet.tryTrial', { n: TRIAL_DAYS, days: daysWord(lang, TRIAL_DAYS) })}
-                </button>
-              )}
               {limitReached && (
                 <button
                   type="button"
@@ -384,6 +369,13 @@ export function AddAddressSheet({ open, onClose, snapshot, onAdded }: AddAddress
                   {t('sheet.buySlot', { n: boot?.monetization?.extraSlotStars ?? 50 })}
                 </button>
               )}
+            </div>
+          )}
+
+          {limitReached && sub && (
+            <div>
+              <p className="mb-2 text-sm text-muted-foreground">{t('sheet.rewardHint')}</p>
+              <TrialCard subscriber={sub} now={new Date()} />
             </div>
           )}
 

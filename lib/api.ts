@@ -1,3 +1,4 @@
+import { showAd } from './ads'
 import { clientPref, resolveLang, translate } from './i18n'
 import type { Snapshot } from './schedule'
 
@@ -32,9 +33,25 @@ export interface Subscriber {
   proActive?: boolean
   rewardSlotExpiresAt?: string | null
   rewardUsed?: boolean
+  reminders?: Reminder[]
+  rewardAdCount?: number
+  rewardAdsGoal?: number
+  rewardHours?: number
 }
 
-export const TRIAL_DAYS = 3
+export interface Reminder {
+  id: string
+  addressId: string
+  dayKey: string
+  hour: number
+  leadMin: number
+  startAt?: number
+  fireAt?: number
+  sent?: boolean
+}
+
+export const REWARD_DAYS = 1
+export const REWARD_ADS_GOAL = 10
 
 export function isTrialActive(s: Subscriber, now = Date.now()) {
   return Boolean(s.rewardSlotExpiresAt) && new Date(s.rewardSlotExpiresAt as string).getTime() > now
@@ -47,20 +64,14 @@ export function maxAddresses(d: Pick<Bootstrap, 'subscriber' | 'monetization'>) 
 }
 
 export async function showRewardedAd() {
-  const show = (window as unknown as Record<string, unknown>).show_12267169 as undefined | (() => Promise<void>)
-  if (typeof show !== 'function') return false
-  try {
-    await show()
-    return true
-  } catch {
-    return false
-  }
+  return showAd()
 }
 
 export interface AlertEvent {
   id: string
   type: string
   queue?: string
+  subscriberId?: string | null
   addressId?: string | null
   addressLabel?: string
   title: string
@@ -107,6 +118,10 @@ interface TelegramWebApp {
   expand?: () => void
   openInvoice?: (url: string, cb?: (status: string) => void) => void
   openTelegramLink?: (url: string) => void
+  shareMessage?: (id: string, cb?: (sent: boolean) => void) => void
+  isVersionAtLeast?: (version: string) => boolean
+  onEvent?: (event: string, cb: (data?: unknown) => void) => void
+  offEvent?: (event: string, cb: (data?: unknown) => void) => void
   setHeaderColor?: (color: string) => void
   setBackgroundColor?: (color: string) => void
   HapticFeedback?: { impactOccurred: (s: string) => void; notificationOccurred: (s: string) => void }

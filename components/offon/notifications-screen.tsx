@@ -4,12 +4,13 @@ import { useState } from 'react'
 import { BellRing, LoaderCircle, Send } from 'lucide-react'
 import type { Bootstrap } from '@/lib/api'
 import { getTelegram, haptic } from '@/lib/api'
-import { useActions, useT } from '@/hooks/use-app-data'
+import { useActions, useT, useVisibleAlerts } from '@/hooks/use-app-data'
 import { AlertItem } from './alert-item'
 
 export function NotificationsScreen({ data }: { data: Bootstrap }) {
   const { testAlert } = useActions()
   const { t } = useT()
+  const alerts = useVisibleAlerts()
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState<string | null>(null)
   const linked = Boolean(data.subscriber.telegramChatId)
@@ -78,11 +79,11 @@ export function NotificationsScreen({ data }: { data: Bootstrap }) {
 
       <section aria-labelledby="events-title">
         <h2 id="events-title" className="mb-2 text-sm text-muted-foreground">
-          {t('alerts.recent', { n: data.alerts.length })}
+          {t('alerts.recent', { n: alerts.length })}
         </h2>
-        {data.alerts.length ? (
+        {alerts.length ? (
           <ul className="space-y-2">
-            {data.alerts.map((a) => (
+            {alerts.map((a) => (
               <AlertItem key={a.id} alert={a} />
             ))}
           </ul>

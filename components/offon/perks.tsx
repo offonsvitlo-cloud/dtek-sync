@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, Copy, FlaskConical, Gift, LoaderCircle, Send, Users } from 'lucide-react'
-import { getTelegram, haptic, isTrialActive, TRIAL_DAYS, type Subscriber } from '@/lib/api'
+import { api, ApiError, getTelegram, haptic, isTrialActive, json, REWARD_ADS_GOAL, REWARD_DAYS, type Subscriber } from '@/lib/api'
 import { daysWord, LOCALE, translate, type Lang } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import { useActions, useExtras, useT } from '@/hooks/use-app-data'
@@ -24,30 +24,66 @@ function timeLeft(iso: string, now: Date, lang: Lang) {
 }
 
 export function TrialCard({ subscriber, now, className }: { subscriber: Subscriber; now: Date; className?: string }) {
-  const { unlockTrial } = useActions()
+  const { watchRewardAd } = useActions()
   const { t, lang } = useT()
   const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  if (subscriber.proActive) return null
+  if (subscriber.proActive || subscriber.adsDisabled) return null
+  const goal = subscriber.rewardAdsGoal ?? REWARD_ADS_GOAL
+  const days = Math.max(1, Math.round((subscriber.rewardHours ?? REWARD_DAYS * 24) / 24))
+  const count = Math.min(subscriber.rewardAdCount ?? 0, goal)
   const active = isTrialActive(subscriber, now.getTime())
-  if (!active && subscriber.rewardUsed) return null
 
-  const activate = async () => {
+  const watch = async () => {
     setBusy(true)
     setError(null)
+    setMessage(null)
     try {
-      await unlockTrial()
+      const res = await watchRewardAd()
       haptic('medium')
+      if (res.granted) setMessage(t('reward.granted', { n: days, days: daysWord(lang, days) }))
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('sheet.trialFail'))
+      if (e instanceof ApiError && e.code === 'TOO_FAST') setError(t('reward.tooFast'))
+      else setError(e instanceof Error ? e.message : t('reward.adFail'))
     } finally {
       setBusy(false)
     }
   }
 
+  const progress = (
+    <div className="mt-3">
+      <p className="text-sm tabular-nums">{t('reward.progress', { n: count, goal })}</p>
+      <div
+        className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={goal}
+        aria-valuenow={count}
+      >
+        <div className="h-full rounded-full bg-on transition-all" style={{ width: `${(count / goal) * 100}%` }} />
+      </div>
+      <button
+        type="button"
+        onClick={watch}
+        disabled={busy}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-on py-2.5 font-medium text-on-foreground shadow-[0_6px_20px_-8px_var(--on)] disabled:opacity-60"
+      >
+        {busy && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
+        {active ? t('reward.extend', { n: days, days: daysWord(lang, days) }) : t('reward.watch')}
+      </button>
+      {message && <p role="status" className="mt-2 text-center text-sm text-on">{message}</p>}
+      {error && (
+        <p role="alert" className="mt-2 text-center text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+
   if (active && subscriber.rewardSlotExpiresAt) {
-    const total = TRIAL_DAYS * 86_400_000
+    const total = days * 86_400_000
     const left = Math.max(0, new Date(subscriber.rewardSlotExpiresAt).getTime() - now.getTime())
     return (
       <section className={cn('rounded-3xl border border-on/40 bg-on-soft p-4', className)} aria-label={t('perk.trialAria')}>
@@ -71,10 +107,11 @@ export function TrialCard({ subscriber, now, className }: { subscriber: Subscrib
           aria-label={t('perk.trialLeft')}
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={Math.round((left / total) * 100)}
+          aria-valuenow={Math.min(100, Math.round((left / total) * 100))}
         >
           <div className="h-full rounded-full bg-on" style={{ width: `${Math.min(100, (left / total) * 100)}%` }} />
         </div>
+        {progress}
       </section>
     )
   }
@@ -90,26 +127,13 @@ export function TrialCard({ subscriber, now, className }: { subscriber: Subscrib
           <FlaskConical className="size-5" aria-hidden="true" />
         </span>
         <div className="min-w-0">
-          <p className="font-display text-lg font-bold">{t('perk.trialTitle', { n: TRIAL_DAYS, days: daysWord(lang, TRIAL_DAYS) })}</p>
+          <p className="font-display text-lg font-bold">{t('reward.title')}</p>
           <p className="text-sm text-muted-foreground">
-            {t('perk.trialDesc')}
+            {t('reward.desc', { goal, n: days, days: daysWord(lang, days) })}
           </p>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={activate}
-        disabled={busy}
-        className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-on py-2.5 font-medium text-on-foreground shadow-[0_6px_20px_-8px_var(--on)] disabled:opacity-60"
-      >
-        {busy && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
-        {t('perk.trialBtn')}
-      </button>
-      {error && (
-        <p role="alert" className="mt-2 text-center text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      {progress}
     </section>
   )
 }
@@ -149,15 +173,75 @@ export function ReferralCard({ className }: { className?: string }) {
     flash(ok ? t('perk.copied') : t('perk.copyFail'))
   }
 
+  // Сообщение «картинка + текст + кнопка» готовится на сервере заранее (Bot API 8.0, shareMessage)
+  const prepared = useRef<{ id: string; exp: number } | null>(null)
+  const canShareMessage = () => {
+    const tg = getTelegram()
+    return Boolean(tg?.initData && tg.shareMessage && tg.isVersionAtLeast?.('8.0'))
+  }
+  const prepare = async () => {
+    if (!canShareMessage()) return null
+    const cur = prepared.current
+    if (cur && cur.exp * 1000 > Date.now() + 60_000) return cur.id
+    try {
+      const res = await api<{ id?: string | null; expiresAt?: number }>('/api/share/prepare', {
+        method: 'POST',
+        body: json({ lang }),
+      })
+      if (res.id) {
+        prepared.current = { id: res.id, exp: res.expiresAt ?? Math.floor(Date.now() / 1000) + 600 }
+        return res.id
+      }
+    } catch {}
+    return null
+  }
+
+  useEffect(() => {
+    if (ref?.link) prepare()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref?.link, lang])
+
+  const fallbackShare = () => {
+    const text = t('perk.shareText')
+    const url = `https://t.me/share/url?url=${encodeURIComponent(ref?.link ?? '')}&text=${encodeURIComponent(text)}`
+    const tg = getTelegram()
+    try {
+      if (tg?.openTelegramLink) {
+        tg.openTelegramLink(url)
+        return
+      }
+    } catch {}
+    const nav = navigator as Navigator & { share?: (d: { url?: string; text?: string }) => Promise<void> }
+    if (typeof nav.share === 'function') {
+      nav.share({ url: ref?.link, text }).catch(() => {})
+      return
+    }
+    const win = window.open(url, '_blank', 'noopener')
+    if (!win && ref?.link) copyToClipboard(ref.link).then((ok) => flash(ok ? t('perk.sharedHint') : t('perk.copyFail')))
+  }
+
   const share = async () => {
     if (!ref?.link) return
     haptic('light')
-    const url = `https://t.me/share/url?url=${encodeURIComponent(ref.link)}&text=${encodeURIComponent(t('perk.shareText'))}`
     const tg = getTelegram()
-    await copyToClipboard(ref.link)
-    if (tg?.initData && tg.openTelegramLink) tg.openTelegramLink(url)
-    else window.open(url, '_blank', 'noopener')
-    flash(t('perk.sharedHint'))
+    const id = prepared.current && prepared.current.exp * 1000 > Date.now() + 60_000 ? prepared.current.id : await prepare()
+    if (id && tg?.shareMessage) {
+      // если Telegram отклонит отправку (не из-за отмены пользователем), открываем обычное окно «Поделиться»
+      const onFail = (data?: unknown) => {
+        tg.offEvent?.('shareMessageFailed', onFail)
+        const err = (data as { error?: string } | undefined)?.error
+        if (err !== 'USER_DECLINED') fallbackShare()
+      }
+      tg.onEvent?.('shareMessageFailed', onFail)
+      setTimeout(() => tg.offEvent?.('shareMessageFailed', onFail), 30_000)
+      try {
+        tg.shareMessage(id)
+        return
+      } catch {
+        tg.offEvent?.('shareMessageFailed', onFail)
+      }
+    }
+    fallbackShare()
   }
 
   return (

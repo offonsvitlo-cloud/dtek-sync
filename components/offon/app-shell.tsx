@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { ApiError, getTelegram, haptic } from '@/lib/api'
-import { useBootstrap, useNow, useT } from '@/hooks/use-app-data'
+import { installAdGuard, loadVignette, startInAppAds } from '@/lib/ads'
+import { useBootstrap, useNow, useT, useVisibleAlerts } from '@/hooks/use-app-data'
 import { AddAddressSheet } from './add-address-sheet'
 import { AddressesScreen } from './addresses-screen'
 import { AppHeader } from './app-header'
@@ -13,12 +14,11 @@ import { NotificationsScreen } from './notifications-screen'
 import { SettingsScreen } from './settings-screen'
 
 const THEME_KEY = 'offonsvitlo_theme'
-const AD_KEY = 'offonsvitlo_last_ad'
-
 export function AppShell() {
   const { data, error, isLoading, mutate } = useBootstrap()
   const now = useNow()
   const { t, lang } = useT()
+  const visibleAlerts = useVisibleAlerts()
   const [tab, setTab] = useState<Tab>('home')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
@@ -45,15 +45,17 @@ export function AppShell() {
     } catch {}
   }, [dark])
 
+  const adsOff = Boolean(data?.demo || data?.subscriber.adsDisabled)
+  const ready = Boolean(data)
   useEffect(() => {
-    if (!data || data.demo || data.subscriber.adsDisabled || !getTelegram()?.initData) return
-    const last = Number(localStorage.getItem(AD_KEY) ?? 0)
-    if (Date.now() - last < 5 * 60 * 1000) return
-    const show = (window as unknown as Record<string, unknown>).show_12267169 as undefined | (() => Promise<void>)
-    if (typeof show !== 'function') return
-    localStorage.setItem(AD_KEY, String(Date.now()))
-    show().catch(() => {})
-  }, [data])
+    installAdGuard()
+  }, [])
+
+  useEffect(() => {
+    if (!ready || adsOff) return
+    loadVignette()
+    if (getTelegram()?.initData) startInAppAds()
+  }, [ready, adsOff])
 
   const toggleDark = useCallback((v: boolean) => {
     haptic('light')
@@ -131,7 +133,7 @@ export function AppShell() {
           </>
         )}
       </main>
-      <BottomNav tab={tab} onChange={changeTab} badge={tab === 'alerts' ? 0 : Math.min(data?.alerts.length ?? 0, 9)} />
+      <BottomNav tab={tab} onChange={changeTab} badge={tab === 'alerts' ? 0 : Math.min(visibleAlerts.length, 9)} />
     </div>
   )
 }

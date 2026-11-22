@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import useSWR from 'swr'
 import {
   api,
@@ -8,13 +8,15 @@ import {
   json,
   maxAddresses,
   showRewardedAd,
-  TRIAL_DAYS,
+  REWARD_ADS_GOAL,
+  REWARD_DAYS,
   type Address,
   type AlertEvent,
   type Bootstrap,
   type ExtrasStatus,
   type Subscriber,
 } from '@/lib/api'
+import { filterAlerts } from '@/lib/alerts'
 import { buildDemoBootstrap } from '@/lib/demo-data'
 import {
   clientPref,
@@ -41,6 +43,11 @@ export function useBootstrap() {
     refreshInterval: 5 * 60 * 1000,
     revalidateOnFocus: true,
   })
+}
+
+export function useVisibleAlerts() {
+  const { data } = useBootstrap()
+  return useMemo(() => filterAlerts(data?.alerts ?? [], data?.subscriber), [data])
 }
 
 export function useLang(): Lang {
@@ -106,18 +113,25 @@ export function useActions() {
 
   return {
     demo,
-    async unlockTrial() {
+    async watchRewardAd(): Promise<{ granted: boolean }> {
+      const goal = data?.subscriber.rewardAdsGoal ?? REWARD_ADS_GOAL
       if (demo) {
+        const count = (data?.subscriber.rewardAdCount ?? 0) + 1
+        const granted = count >= goal
         await patchLocal((s) => ({
           ...s,
-          rewardSlotExpiresAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000).toISOString(),
-          rewardUsed: true,
+          rewardAdCount: granted ? 0 : count,
+          rewardSlotExpiresAt: granted
+            ? new Date(Date.now() + REWARD_DAYS * 86_400_000).toISOString()
+            : s.rewardSlotExpiresAt,
         }))
-        return
+        return { granted }
       }
-      if (!data?.subscriber.adsDisabled) await showRewardedAd()
-      const res = await api<{ subscriber: Subscriber }>('/api/billing/unlock-reward-slot', { method: 'POST' })
+      const shown = await showRewardedAd()
+      if (!shown) throw new ApiError(translate(lang, 'reward.adFail'), 0, 'AD_NOT_SHOWN')
+      const res = await api<{ subscriber: Subscriber; granted: boolean }>('/api/billing/reward-ad', { method: 'POST' })
       await setSubscriber(res.subscriber)
+      return { granted: res.granted }
     },
     async addAddress(body: NewAddress) {
       if (demo) {
@@ -188,6 +202,34 @@ export function useActions() {
       })
       await setSubscriber(res.subscriber)
     },
+    async addReminder(body: { addressId: string; dayKey: string; hour: number; leadMin: number }) {
+      if (demo) {
+        const startAt = Number(body.dayKey) + (body.hour - 1) * 3600
+        await patchLocal((s) => ({
+          ...s,
+          reminders: [
+            ...(s.reminders ?? []).filter(
+              (r) => !(r.addressId === body.addressId && r.dayKey === body.dayKey && r.hour === body.hour),
+            ),
+            { id: `demo_rem_${Math.random().toString(36).slice(2, 8)}`, ...body, startAt, fireAt: startAt - body.leadMin * 60 },
+          ],
+        }))
+        return
+      }
+      const res = await api<{ subscriber: Subscriber }>('/api/subscriber/reminders', {
+        method: 'POST',
+        body: json(body),
+      })
+      await setSubscriber(res.subscriber)
+    },
+    async deleteReminder(id: string) {
+      if (demo) {
+        await patchLocal((s) => ({ ...s, reminders: (s.reminders ?? []).filter((r) => r.id !== id) }))
+        return
+      }
+      const res = await api<{ subscriber: Subscriber }>(`/api/subscriber/reminders/${id}`, { method: 'DELETE' })
+      await setSubscriber(res.subscriber)
+    },
     async refreshDtek() {
       if (demo) {
         await mutate()
@@ -201,6 +243,7 @@ export function useActions() {
         const evt: AlertEvent = {
           id: `demo_${Date.now()}`,
           type: 'bot_message',
+          subscriberId: data?.subscriber.id,
           title: translate(lang, 'alerts.demoTitle'),
           message: translate(lang, 'alerts.demoMsg'),
           createdAt: new Date().toISOString(),
